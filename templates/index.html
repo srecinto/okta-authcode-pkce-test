@@ -1,0 +1,167 @@
+{% extends "_defualt.html" %}
+{% block content %}
+
+<div>
+    <div>User Name</div>
+    <div><input type="text" id="username" value="" /></div>
+    <div>Password</div>
+    <div><input type="password" id="password" value="" /></div>
+    <div><input type="button" id="submit" value="Login" /></div>
+</div>
+
+<script>
+var config = {
+    url: '{{ app_config.okta_org }}',
+    clientId: '{{ app_config.okta_client_id }}',
+    redirectUri: '{{ app_config.okta_redirect_uri }}',
+    pkce:  true,
+
+    // other config
+    issuer: '{{ app_config.okta_issuer }}',
+    
+    // TokenManager config
+    tokenManager: {
+        secure: true,
+        storage: 'cookie',
+        expireEarlySeconds: 290
+    },
+    
+    onSessionExpired: function() {
+        console.log('re-authorization is required');
+    }
+};
+
+var authClient = new OktaAuth(config);
+
+$("#submit").on("click", handleLoginClick);
+
+authClient.tokenManager.on('renewed', function (key, newToken, oldToken) {
+    console.log("renewing token");
+    console.log(key);
+    console.log(newToken);
+    
+    //Now Refresh the Session
+    console.log("refreshing session...");
+    refreshOktaSession();
+});
+
+authClient.token.parseFromUrl()
+    .then(function(tokenOrTokens) {
+        // manage token or tokens
+        console.log(tokenOrTokens);
+        for(let i = 0; i < tokenOrTokens.length;i++) {
+            let key = "";
+            
+            if(tokenOrTokens[i].accessToken) {
+                key = "accessToken";
+            } else if(tokenOrTokens[i].idToken) {
+                key = "idToken";
+            } else if(tokenOrTokens[i].refreshToken) {
+                key = "refreshToken";
+            }
+            
+            
+            if(key != "") {
+                console.log(tokenOrTokens[i]);
+                authClient.tokenManager.add(key, tokenOrTokens[i]);
+            }
+        } 
+    })
+    .catch(function(err) {
+        // handle OAuthError... usually means not valid code or token to parse though
+    });
+
+authClient.session.exists()
+    .then(function(exists) {
+        if (exists) {
+            console.log("Logged in!");
+            authClient.tokenManager.get("accessToken")
+            .then(function(token) {
+                console.log("Getting Token");
+                //console.log(token);
+                if (token) {
+                    // Token is valid
+                    console.log("Valid Token");
+                    console.log(token);
+                } else {
+                    // Token has expired
+                    console.log("Invalid Token");
+                }               
+            })
+            .catch(function(err) {
+                 // OAuth Error
+                console.error(err);
+            });
+        } else {
+            console.log("No session");
+            authClient.tokenManager.get("accessToken")
+                .then(function(token) {
+                    console.log("Getting Token");
+                    //console.log(token);
+                    if (token) {
+                        // Token is valid
+                        console.log("Valid Token");
+                        console.log(token);
+                    } else {
+                        // Token has expired
+                        console.log("Invalid Token");
+                    }               
+                })
+                .catch(function(err) {
+                     // OAuth Error
+                    console.error(err);
+                });
+        }
+    })
+    .catch(function(err) {
+        // handle OAuthError... usually means not valid code or token to parse though
+    });
+
+
+
+function handleLoginClick() {
+    console.log("handleLoginClick()");
+    let username = $("#username").val();
+    let password = $("#password").val();
+    
+    authClient.signIn({
+        username: username,
+        password: password
+    })
+    .then(function(transaction) {
+        if (transaction.status === 'SUCCESS') {
+            console.log("Login Success");
+            console.log(transaction);
+            //authClient.session.setCookieAndRedirect(transaction.sessionToken); // Sets a cookie on redirect
+            authClient.token.getWithRedirect({
+                sessionToken: transaction.sessionToken,
+                scopes: ["openid", "email", "profile"]
+            });
+        } else {
+            throw 'We cannot handle the ' + transaction.status + ' status';
+        }
+    })
+    .fail(function(err) {
+        console.error(err);
+    });
+}
+
+function refreshOktaSession() {
+    console.log("refreshOktaSession()");
+    authClient.session.refresh()
+        .then(function(session) {
+          // existing session is now refreshed
+          console.log("refreshed");
+        })
+        .catch(function(err) {
+          // there was a problem refreshing (the user may not have an existing session)
+            console.log("Failed to refresh token");
+            console.log(err);
+        });
+}
+
+setInterval(refreshOktaSession, 5000);  //Refresh the session every so often.  may need to tweak to make it happen every 30 mins or just before the session expiration
+
+</script>
+
+{% endblock %}
